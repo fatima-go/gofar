@@ -38,6 +38,7 @@ const (
 	gitConfigfile   = "config"
 	procTypeGeneral = "GENERAL"
 	procTypeUI      = "USER_INTERACTIVE"
+	envSeparator    = ":"
 )
 
 type CmdRecord struct {
@@ -129,7 +130,14 @@ func (b *BuildContext) Packaging() error {
 }
 
 func getGOPath() string {
-	return os.Getenv("GOPATH")
+	gopath := os.Getenv("GOPATH")
+
+	idx := strings.Index(gopath, envSeparator)
+	if idx < 0 {
+		return gopath
+	}
+
+	return gopath[:idx]
 }
 
 func (b *BuildContext) compress() error {
