@@ -23,7 +23,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -94,7 +93,7 @@ func (b BuildContext) Print() {
 
 func (b *BuildContext) Packaging() error {
 	var err error
-	b.workingDir, err = ioutil.TempDir("/tmp", b.ExposeProcessName)
+	b.workingDir, err = os.MkdirTemp("/tmp", b.ExposeProcessName)
 	if err != nil {
 		return fmt.Errorf("fail to create tmp dir : %s", err.Error())
 	}
@@ -169,13 +168,7 @@ func (b *BuildContext) createDeployment() error {
 	m := make(map[string]interface{})
 	m["process"] = b.ExposeProcessName
 	m["process_type"] = b.procType
-	//if len(cmdFlag.ExtraBin) > 0 {
-	//	binNameList := make([]string, 0)
-	//	for _, v := range cmdFlag.ExtraBin {
-	//		binNameList = append(binNameList, filepath.Base(v))
-	//	}
-	//	m["extra_bin"] = binNameList
-	//}
+
 	build := make(map[string]interface{})
 	zoneName, _ := time.Now().Zone()
 	build["time"] = time.Now().Format(yyyyMMddHHmmss) + " " + zoneName
@@ -186,27 +179,18 @@ func (b *BuildContext) createDeployment() error {
 		user = "unknown"
 	}
 	build["user"] = strings.TrimSpace(user)
-	gitBranch, err := ReadGitBranch(b.ProjectBaseDir)
-	if err == nil {
-		if len(gitBranch) > 0 {
-			git := make(map[string]string)
-			git["branch"] = gitBranch
-			gitCommit := ReadGitCommit(b.ProjectBaseDir, gitBranch)
-			git["commit"] = gitCommit
-			fmt.Printf("\n>> mark build info : branch=%s, commit=%s\n", gitBranch, gitCommit)
-			build["git"] = git
-		}
+	gitInfo := readGitInfo(b.ProjectBaseDir)
+	if gitInfo.Valid {
+		build["git"] = gitInfo.ToMap()
 	}
-
 	m["build"] = build
-
 	dat, err := json.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("fail to create deployment : %s", err.Error())
 	}
 
 	depfile := filepath.Join(b.workingDir, "deployment.json")
-	err = ioutil.WriteFile(depfile, dat, 0644)
+	err = os.WriteFile(depfile, dat, 0644)
 	if err != nil {
 		return fmt.Errorf("fail to write deployment.json : %s", err.Error())
 	}
@@ -279,7 +263,7 @@ func (b *BuildContext) loadResourceFromProject() error {
 func findResourceFromDirectory(baseDir string) ([]string, error) {
 	resourceFileList := make([]string, 0)
 
-	files, err := ioutil.ReadDir(baseDir)
+	files, err := os.ReadDir(baseDir)
 	if err != nil {
 		return resourceFileList, fmt.Errorf("findResourceFromDirectory error : %s\n", err.Error())
 	}

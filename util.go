@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,7 +50,7 @@ func CheckDirExist(path string) error {
 }
 
 func EnsureFileInDirectory(dir, targetFilename string) bool {
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fail to read dir %s : %s", dir, err.Error())
 		return false
@@ -85,7 +84,7 @@ func FindGitConfig(dir string) (string, error) {
 		return "", errGitNotFound
 	}
 
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return "", err
 	}
@@ -104,12 +103,12 @@ func FindGitConfig(dir string) (string, error) {
 }
 
 func FindDirectory(baseDir, targetDir string) (string, error) {
-	files, err := ioutil.ReadDir(baseDir)
+	files, err := os.ReadDir(baseDir)
 	if err != nil {
 		return "", err
 	}
 
-	nextPathList := make([]os.FileInfo, 0)
+	nextPathList := make([]os.DirEntry, 0)
 	for _, file := range files {
 		if file.Name() == targetDir {
 			if file.IsDir() {
@@ -137,7 +136,7 @@ func FindDirectory(baseDir, targetDir string) (string, error) {
 
 func FindSubDirectories(baseDir string) []string {
 	list := make([]string, 0)
-	files, err := ioutil.ReadDir(baseDir)
+	files, err := os.ReadDir(baseDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fail to read dir : %s", err.Error())
 		return list
@@ -256,7 +255,7 @@ func ExecuteShell(wd, command string) (string, error) {
 func ReadGitBranch(baseDir string) (string, error) {
 	headFile := filepath.Join(baseDir, ".git", "HEAD")
 
-	dat, err := ioutil.ReadFile(headFile)
+	dat, err := os.ReadFile(headFile)
 	if err != nil {
 		return "", fmt.Errorf("not found git head")
 	}
@@ -268,7 +267,7 @@ func ReadGitBranch(baseDir string) (string, error) {
 
 func ReadGitCommit(baseDir string, branch string) string {
 	commitFile := filepath.Join(baseDir, ".git", "refs", "heads", branch)
-	dat, err := ioutil.ReadFile(commitFile)
+	dat, err := os.ReadFile(commitFile)
 	if err != nil {
 		return ""
 	}
