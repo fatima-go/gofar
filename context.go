@@ -91,15 +91,15 @@ func (b BuildContext) Print() {
 
 func (b *BuildContext) Packaging() error {
 	var err error
-	b.workingDir, err = os.MkdirTemp("/tmp", b.ExposeProcessName)
+	b.workingDir, err = os.MkdirTemp("", b.ExposeProcessName)
 	if err != nil {
 		return fmt.Errorf("fail to create tmp dir : %s", err.Error())
 	}
 
 	log.Printf("working directory : %s\n", b.workingDir)
-	//defer func() {
-	//	os.RemoveAll(b.workingDir)
-	//}()
+	defer func() {
+		os.RemoveAll(b.workingDir)
+	}()
 
 	err = b.prepareBinary()
 	if err != nil {

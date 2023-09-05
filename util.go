@@ -30,6 +30,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"time"
 )
 
 func CheckDirExist(path string) error {
@@ -279,25 +281,45 @@ func ZipArtifact(baseDir, artifactFile string) error {
 			path = fmt.Sprintf("%s%c", path, os.PathSeparator)
 		}
 
-		w, err := zw.Create(path)
+		err = copyIntoZip(zw, path, f)
 		if err != nil {
 			return err
-		}
-
-		if !f.IsDir {
-			file, err := os.Open(f.Path)
-			if err != nil {
-				return err
-			}
-			defer file.Close()
-
-			if _, err = io.Copy(w, file); err != nil {
-				return err
-			}
 		}
 	}
 
 	return nil
+}
+
+func copyIntoZip(zw *zip.Writer, path string, f fileMeta) error {
+	header := &zip.FileHeader{
+		Name:     path,
+		Method:   zip.Deflate,
+		Modified: time.Now(),
+	}
+
+	// check platform support relative file
+	if strings.HasPrefix(path, fmt.Sprintf("/%s", PlatformDirName)) {
+		// platform support binary file should be set execute mode
+		header.SetMode(0755)
+	}
+
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		return err
+	}
+
+	if f.IsDir {
+		return nil
+	}
+
+	file, err := os.Open(f.Path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	_, err = io.Copy(w, file)
+	return err
 }
 
 func EnsureDirectory(dir string) error {
