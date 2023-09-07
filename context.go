@@ -22,11 +22,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -57,8 +60,6 @@ type BuildContext struct {
 	ResourceDir       string
 	ProcessList       []CmdRecord
 	ExposeProcessName string
-	BuildOS           string
-	BuildArc          string
 	BuildCGOLink      string
 	workingDir        string
 	procType          string
@@ -86,14 +87,11 @@ func (b BuildContext) Print() {
 	} else {
 		fmt.Printf("binary : %s\n", b.ExposeProcessName)
 	}
-	if len(b.BuildOS) > 0 {
-		fmt.Printf("build : GOOS=%s GOARC=%s\n", b.BuildOS, b.BuildArc)
-	}
 }
 
 func (b *BuildContext) Packaging() error {
 	var err error
-	b.workingDir, err = os.MkdirTemp("/tmp", b.ExposeProcessName)
+	b.workingDir, err = os.MkdirTemp("", b.ExposeProcessName)
 	if err != nil {
 		return fmt.Errorf("fail to create tmp dir : %s", err.Error())
 	}
@@ -150,7 +148,7 @@ func (b *BuildContext) compress() error {
 
 	farName := fmt.Sprintf("%s.far", b.ExposeProcessName)
 	b.farPath = filepath.Join(farDir, farName)
-	err = Zipit(b.workingDir, b.farPath)
+	err = ZipArtifact(b.workingDir, b.farPath)
 	if err != nil {
 		return fmt.Errorf("fail to compress : %s", err.Error())
 	}
@@ -295,36 +293,10 @@ func findResourceFromDirectory(baseDir string) ([]string, error) {
 // prepare binaries...
 func (b *BuildContext) prepareBinary() error {
 	if len(b.ProcessList) == 0 {
-		return b.preparePrecompiledBinary()
+		return fmt.Errorf("not found target process list")
 	}
 
 	return b.prepareCmdRecordBinary()
-}
-
-func (b *BuildContext) preparePrecompiledBinary() error {
-	var err error
-	// check pre-compiled binary
-	precompiledBin := filepath.Join(getGOPath(), "bin", b.ExposeProcessName)
-	if len(b.BuildOS) > 0 {
-		osArch := fmt.Sprintf("%s_%s", b.BuildOS, b.BuildArc)
-		precompiledBin = filepath.Join(getGOPath(), "bin", osArch, b.ExposeProcessName)
-	}
-	err = CheckFileExist(precompiledBin)
-	if err != nil {
-		return fmt.Errorf("cannot find precompiled binary : %s", b.ExposeProcessName)
-	}
-	cmdRecord := CmdRecord{}
-	cmdRecord.Path = precompiledBin
-	fmt.Printf("using precompiled binary : %s (%s)\n", precompiledBin, getFileModtime(precompiledBin))
-
-	// binary 복사
-	targetBin := filepath.Join(b.workingDir, b.ExposeProcessName)
-	err = CopyFile(precompiledBin, targetBin)
-	if err != nil {
-		return fmt.Errorf("fail to precompiled binary copy : %s\n", err.Error())
-	}
-	os.Chmod(targetBin, 0755)
-	return nil
 }
 
 func (b *BuildContext) prepareCmdRecordBinary() error {
@@ -332,42 +304,87 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 	for _, cmdRecord := range b.ProcessList {
 		cmdBinName := cmdRecord.GetBinaryname()
 		fmt.Printf("\n>> compiling %s...\n", cmdBinName)
-		targetBin := filepath.Join(b.workingDir, cmdBinName)
-		command := fmt.Sprintf("go build -o %s", targetBin)
-		if len(b.BuildOS) > 0 {
-			if len(b.BuildCGOLink) == 0 {
-				command = fmt.Sprintf("GOOS=%s GOARCH=%s go build -o %s", b.BuildOS, b.BuildArc, targetBin)
-			} else {
-				command = fmt.Sprintf("CC=%s GOOS=%s GOARCH=%s CGO_ENABLED=1 go build -o %s -ldflags='-s -w'",
-					b.BuildCGOLink, b.BuildOS, b.BuildArc, targetBin)
-			}
+
+		var compileError uint32 = 0
+		wg := sync.WaitGroup{}
+		wg.Add(len(buildPlatformList.Platforms))
+		for _, platform := range buildPlatformList.Platforms {
+			request := BinCompileRequest{}
+			request.TargetDir = filepath.Join(b.workingDir, PlatformDirName, platform.getPlatformDirectory())
+			request.BinName = cmdBinName
+			request.BinSourcePath = cmdRecord.Path
+			request.Os = platform.Os
+			request.Arch = platform.Arch
+			request.BuildCGOLink = b.BuildCGOLink
+			go compileBinary(&wg, &compileError, request)
 		}
-		fmt.Printf("%s\n", command)
-		out, err := ExecuteShell(cmdRecord.Path, command)
-		if err != nil {
-			return fmt.Errorf("fail to execute command : %s\n%s\n", err.Error(), out)
+		wg.Wait()
+
+		if compileError > 0 {
+			return fmt.Errorf("fail to prepare binary %s\n", cmdBinName)
 		}
-		if len(out) > 0 {
-			return fmt.Errorf("fail to build binary %s\n%s\n", cmdBinName, out)
-		}
-		os.Chmod(targetBin, 0755)
 	}
 
 	return nil
 }
 
-func NewBuildContext(procName, osArc, cgoLink string) (*BuildContext, error) {
+const (
+	PlatformDirName = "platform"
+)
+
+type BinCompileRequest struct {
+	TargetDir     string
+	BinSourcePath string
+	BinName       string
+	Os            string
+	Arch          string
+	BuildCGOLink  string
+}
+
+// compileBinary 바이너리를 컴파일한다
+func compileBinary(wg *sync.WaitGroup, compileError *uint32, request BinCompileRequest) {
+	defer wg.Done()
+
+	err := os.MkdirAll(request.TargetDir, 0744)
+	if err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			fmt.Printf("fail to prepare platform dir %s : %s\n", request.TargetDir, err.Error())
+			atomic.AddUint32(compileError, 1)
+			return
+		}
+	}
+
+	targetBin := filepath.Join(request.TargetDir, request.BinName)
+	command := fmt.Sprintf("go build -o %s", targetBin)
+	if len(request.BuildCGOLink) == 0 {
+		command = fmt.Sprintf("GOOS=%s GOARCH=%s go build -o %s", request.Os, request.Arch, targetBin)
+	} else {
+		command = fmt.Sprintf("CC=%s GOOS=%s GOARCH=%s CGO_ENABLED=1 go build -o %s -ldflags='-s -w'",
+			request.BuildCGOLink, request.Os, request.Arch, targetBin)
+	}
+	fmt.Printf("%s\n", command)
+	out, err := ExecuteShell(request.BinSourcePath, command)
+	if err != nil {
+		fmt.Printf("fail to execute command : %s\n%s\n", err.Error(), out)
+		atomic.AddUint32(compileError, 1)
+		return
+	}
+
+	if len(out) > 0 {
+		fmt.Printf("fail to build binary %s : %s\n%s\n", filepath.Base(request.TargetDir), request.BinName, out)
+		atomic.AddUint32(compileError, 1)
+		return
+	}
+
+	_ = os.Chmod(targetBin, 0755)
+}
+
+func NewBuildContext(procName, cgoLink string) (*BuildContext, error) {
+	loadPlatform()
+
 	ctx := &BuildContext{}
 	ctx.ExposeProcessName = procName
 	ctx.procType = procTypeGeneral
-	if len(osArc) > 0 {
-		tokenList := strings.Split(osArc, "_")
-		if len(tokenList) != 2 {
-			return nil, fmt.Errorf("invalid os arc (%s)", osArc)
-		}
-		ctx.BuildOS = strings.TrimSpace(tokenList[0])
-		ctx.BuildArc = strings.TrimSpace(tokenList[1])
-	}
 	if len(cgoLink) > 0 {
 		ctx.BuildCGOLink = cgoLink
 	}

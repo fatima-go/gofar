@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 func CheckDirExist(path string) error {
@@ -231,15 +232,6 @@ func ExecuteShell(wd, command string) (string, error) {
 
 	var cmd *exec.Cmd
 	cmd = exec.Command("/bin/sh", "-c", command)
-	//s := regexp.MustCompile("\\s+").Split(command, -1)
-	//i := len(s)
-	//if i == 0 {
-	//	return "", errors.New("empty command")
-	//} else if i == 1 {
-	//	cmd = exec.Command(s[0])
-	//} else {
-	//	cmd = exec.Command(s[0], s[1:]...)
-	//}
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -252,92 +244,81 @@ func ExecuteShell(wd, command string) (string, error) {
 	return out.String(), nil
 }
 
-func ReadGitBranch(baseDir string) (string, error) {
-	headFile := filepath.Join(baseDir, ".git", "HEAD")
-
-	dat, err := os.ReadFile(headFile)
-	if err != nil {
-		return "", fmt.Errorf("not found git head")
-	}
-
-	head := strings.Trim(string(dat), " \r\n\t")
-	idx := strings.LastIndex(head, "/")
-	return head[idx+1:], nil
+type fileMeta struct {
+	Path  string
+	IsDir bool
 }
 
-func ReadGitCommit(baseDir string, branch string) string {
-	commitFile := filepath.Join(baseDir, ".git", "refs", "heads", branch)
-	dat, err := os.ReadFile(commitFile)
-	if err != nil {
-		return ""
-	}
-
-	return string(dat)[:12]
-}
-
-func Zipit(source, target string) error {
-	zipfile, err := os.Create(target)
+func ZipArtifact(baseDir, artifactFile string) error {
+	var files []fileMeta
+	err := filepath.Walk(baseDir, func(path string, info os.FileInfo, err error) error {
+		files = append(files, fileMeta{Path: path, IsDir: info.IsDir()})
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	defer zipfile.Close()
 
-	archive := zip.NewWriter(zipfile)
-	defer archive.Close()
-
-	_, err = os.Stat(source)
+	z, err := os.Create(artifactFile)
 	if err != nil {
+		return err
+	}
+	defer z.Close()
+
+	zw := zip.NewWriter(z)
+	defer zw.Close()
+
+	for _, f := range files {
+		path := f.Path
+
+		if len(baseDir) == len(path) {
+			path = ""
+		} else if len(baseDir) < len(path) {
+			path = fmt.Sprintf("%c%s", os.PathSeparator, path[len(baseDir)+1:])
+		}
+
+		if f.IsDir {
+			path = fmt.Sprintf("%s%c", path, os.PathSeparator)
+		}
+
+		err = copyIntoZip(zw, path, f)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func copyIntoZip(zw *zip.Writer, path string, f fileMeta) error {
+	header := &zip.FileHeader{
+		Name:     path,
+		Method:   zip.Deflate,
+		Modified: time.Now(),
+	}
+
+	// check platform support relative file
+	if strings.HasPrefix(path, fmt.Sprintf("/%s", PlatformDirName)) {
+		// platform support binary file should be set execute mode
+		header.SetMode(0755)
+	}
+
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		return err
+	}
+
+	if f.IsDir {
 		return nil
 	}
 
-	var baseDir string
-	//if info.IsDir() {
-	//	baseDir = filepath.Base(source)
-	//}
-
-	filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		//fmt.Printf("zip path : %s\n", path)
-		if source == path {
-			return nil
-		}
-
-		if err != nil {
-			return err
-		}
-
-		header, err := zip.FileInfoHeader(info)
-		if err != nil {
-			return err
-		}
-
-		if baseDir != "" {
-			header.Name = filepath.Join(baseDir, strings.TrimPrefix(path, source))
-		}
-
-		if info.IsDir() {
-			header.Name += "/"
-		} else {
-			header.Method = zip.Deflate
-		}
-
-		writer, err := archive.CreateHeader(header)
-		if err != nil {
-			return err
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		_, err = io.Copy(writer, file)
+	file, err := os.Open(f.Path)
+	if err != nil {
 		return err
-	})
+	}
+	defer file.Close()
 
+	_, err = io.Copy(w, file)
 	return err
 }
 
