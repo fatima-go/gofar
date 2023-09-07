@@ -21,6 +21,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"gopkg.in/yaml.v3"
@@ -74,13 +75,21 @@ func prepareDefaultPlatformFile() {
 	}
 
 	platformList := newDefaultBuildPlatformConfig()
-	data, err := yaml.Marshal(platformList)
-	if err != nil {
-		panic(fmt.Errorf("fail to marshal default config yaml : %s", err.Error()))
-	}
+
+	var comment = "---\n" +
+		"# if you want to check platform support list, use below command\n" +
+		"# $ go tool dist list\n" +
+		"# \n"
+
+	var buff bytes.Buffer
+	buff.WriteString(comment)
+	yamlEncoder := yaml.NewEncoder(&buff)
+	yamlEncoder.SetIndent(2)
+	_ = yamlEncoder.Encode(&platformList)
+	//buff.Write(data)
 
 	yamlFilePath := filepath.Join(configDir, ConfigPlatformFile)
-	err = os.WriteFile(yamlFilePath, data, 0744)
+	err = os.WriteFile(yamlFilePath, buff.Bytes(), 0744)
 	if err != nil {
 		panic(fmt.Errorf("fail to create default config yaml file : %s", err.Error()))
 	}
@@ -94,7 +103,7 @@ platform_list:
     arch : arm64
 */
 type YamlBuildPlatformConfig struct {
-	Platforms []PlatformItem `yaml:"platform_list,flow"`
+	Platforms []PlatformItem `yaml:"platform_list"`
 }
 
 type PlatformItem struct {
