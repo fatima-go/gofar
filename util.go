@@ -81,8 +81,12 @@ func FindGitConfig(dir string) (string, error) {
 		return "", errGopathNotFound
 	}
 
-	if dir == filepath.Join(gopath, "src") {
-		return "", errGitNotFound
+	//gopathMap := buildGopathMap()
+	// 여러개의 gopath 가 정의되어 있는 경우도 처리하도록 한다
+	for gopath, _ := range buildGopathMap() {
+		if dir == filepath.Join(gopath, "src") {
+			return "", errGitNotFound
+		}
 	}
 
 	files, err := os.ReadDir(dir)
@@ -101,6 +105,16 @@ func FindGitConfig(dir string) (string, error) {
 
 	parentDir := filepath.Dir(dir)
 	return FindGitConfig(parentDir)
+}
+
+// buildGopathMap gopath 변수들을 set 형태로 구한다
+func buildGopathMap() map[string]struct{} {
+	tokens := strings.Split(os.Getenv("GOPATH"), fmt.Sprintf("%c", os.PathListSeparator))
+	m := make(map[string]struct{})
+	for _, token := range tokens {
+		m[strings.TrimSpace(token)] = struct{}{}
+	}
+	return m
 }
 
 func FindDirectory(baseDir, targetDir string) (string, error) {

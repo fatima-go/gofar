@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,7 +39,6 @@ const (
 	gitConfigfile   = "config"
 	procTypeGeneral = "GENERAL"
 	procTypeUI      = "USER_INTERACTIVE"
-	envSeparator    = ":"
 )
 
 type CmdRecord struct {
@@ -59,6 +57,7 @@ type BuildContext struct {
 	ProjectBaseDir    string
 	ResourceDir       string
 	ProcessList       []CmdRecord
+	GitSupport        bool
 	ExposeProcessName string
 	BuildCGOLink      string
 	workingDir        string
@@ -74,6 +73,7 @@ func (b BuildContext) Print() {
 	fmt.Printf("project base dir : %s\n", b.ProjectBaseDir)
 	fmt.Printf("resource dir : %s\n", b.ResourceDir)
 	fmt.Printf("expose process name : %s\n", b.ExposeProcessName)
+
 	if len(b.ProcessList) > 0 {
 		binList := ""
 		for i, v := range b.ProcessList {
@@ -85,7 +85,7 @@ func (b BuildContext) Print() {
 		}
 		fmt.Printf("binary : %s\n", binList)
 	} else {
-		fmt.Printf("binary : %s\n", b.ExposeProcessName)
+		fmt.Printf("binary process : %s\n", b.ExposeProcessName)
 	}
 }
 
@@ -96,7 +96,7 @@ func (b *BuildContext) Packaging() error {
 		return fmt.Errorf("fail to create tmp dir : %s", err.Error())
 	}
 
-	log.Printf("working directory : %s\n", b.workingDir)
+	fmt.Printf("working directory : %s\n", b.workingDir)
 	defer func() {
 		os.RemoveAll(b.workingDir)
 	}()
@@ -129,7 +129,7 @@ func (b *BuildContext) Packaging() error {
 func getGOPath() string {
 	gopath := os.Getenv("GOPATH")
 
-	idx := strings.Index(gopath, envSeparator)
+	idx := strings.Index(gopath, fmt.Sprintf("%c", os.PathListSeparator))
 	if idx < 0 {
 		return gopath
 	}
@@ -177,9 +177,11 @@ func (b *BuildContext) createDeployment() error {
 		user = "unknown"
 	}
 	build["user"] = strings.TrimSpace(user)
-	gitInfo := readGitInfo(b.ProjectBaseDir)
-	if gitInfo.Valid {
-		build["git"] = gitInfo.ToMap()
+	if b.GitSupport {
+		gitInfo := readGitInfo(b.ProjectBaseDir)
+		if gitInfo.Valid {
+			build["git"] = gitInfo.ToMap()
+		}
 	}
 	m["build"] = build
 	dat, err := json.Marshal(m)
@@ -383,23 +385,20 @@ func NewBuildContext(procName, cgoLink string) (*BuildContext, error) {
 	loadPlatform()
 
 	ctx := &BuildContext{}
+	ctx.GitSupport = false
 	ctx.ExposeProcessName = procName
 	ctx.procType = procTypeGeneral
 	if len(cgoLink) > 0 {
 		ctx.BuildCGOLink = cgoLink
 	}
 
-	var err error
-	currentWd, _ := os.Getwd()
-	ctx.ProjectBaseDir, err = determineProjectBaseDir(currentWd, procName)
+	err := determineProjectBaseDir(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fail to build context. %s", err.Error())
 	}
 
 	determineResourceDir(ctx)
-	if err = determineCmdList(ctx); err != nil {
-		//return nil, fmt.Errorf("fail to build context. %s", err.Error())
-	}
+	determineCmdList(ctx)
 
 	return ctx, nil
 }
@@ -417,35 +416,55 @@ func determineResourceDir(ctx *BuildContext) {
 }
 
 // find project base dir
-func determineProjectBaseDir(baseDir, procName string) (string, error) {
-	foundBaseDir, err := FindGitConfig(baseDir)
+func determineProjectBaseDir(ctx *BuildContext) error {
+	currentWd, _ := os.Getwd()
+
+	// check git support
+	foundBaseDir, err := FindGitConfig(currentWd)
 	if err == nil {
-		return foundBaseDir, err
+		ctx.ProjectBaseDir = foundBaseDir
+		ctx.GitSupport = true
+		return nil
 	}
 
-	if err != errGitNotFound {
-		return foundBaseDir, err
+	if !errors.Is(err, errGitNotFound) {
+		return fmt.Errorf("fail to check git support. %s", err.Error())
 	}
 
-	// search $GOPATH/src
-	gopathSrcDir := filepath.Join(getGOPath(), "src")
+	// git not found case
+	// $GOPATH/src 하위에서 프로세스 이름으로 된 디렉토리를 찾는다
+	foundBase := false
+	for gopath, _ := range buildGopathMap() {
+		gopathSrcDir := filepath.Join(gopath, "src")
+		foundBaseDir, err := FindDirectory(gopathSrcDir, ctx.ExposeProcessName)
+		if err == nil {
+			ctx.ProjectBaseDir = foundBaseDir
+			foundBase = true
+			break
+		}
+	}
 
-	return FindDirectory(gopathSrcDir, procName)
+	if !foundBase {
+		return fmt.Errorf("cannot find project base directory")
+	}
+	return nil
 }
 
 // find project base dir
-func determineCmdList(ctx *BuildContext) error {
+func determineCmdList(ctx *BuildContext) {
+	ctx.ProcessList = make([]CmdRecord, 0)
+
 	foundDir, err := FindDirectory(ctx.ProjectBaseDir, cmdDirname)
 	if err != nil {
-		return err
+		record := CmdRecord{}
+		record.Path = ctx.ProjectBaseDir
+		ctx.ProcessList = append(ctx.ProcessList, record)
+		return
 	}
 
-	ctx.ProcessList = make([]CmdRecord, 0)
 	for _, cmd := range FindSubDirectories(foundDir) {
 		record := CmdRecord{}
 		record.Path = cmd
 		ctx.ProcessList = append(ctx.ProcessList, record)
 	}
-
-	return nil
 }
