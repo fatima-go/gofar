@@ -106,6 +106,29 @@ type YamlBuildPlatformConfig struct {
 	Platforms []PlatformItem `yaml:"platform_list"`
 }
 
+func (y YamlBuildPlatformConfig) GetLocalPlatform() PlatformItem {
+	for _, platform := range y.Platforms {
+		if platform.Os == runtime.GOOS && platform.Arch == runtime.GOARCH {
+			return platform
+		}
+	}
+
+	// invalid something...
+	return PlatformItem{Os: runtime.GOOS, Arch: runtime.GOARCH}
+}
+
+func (y YamlBuildPlatformConfig) GetAdditionalPlatforms() []PlatformItem {
+	list := make([]PlatformItem, 0)
+	for _, platform := range y.Platforms {
+		if platform.Os == runtime.GOOS && platform.Arch == runtime.GOARCH {
+			continue
+		}
+		list = append(list, platform)
+	}
+
+	return list
+}
+
 type PlatformItem struct {
 	Os   string `yaml:"os"`
 	Arch string `yaml:"arch"`
