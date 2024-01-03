@@ -107,13 +107,6 @@ type YamlBuildPlatformConfig struct {
 }
 
 func (y YamlBuildPlatformConfig) GetLocalPlatform() PlatformItem {
-	for _, platform := range y.Platforms {
-		if platform.Os == runtime.GOOS && platform.Arch == runtime.GOARCH {
-			return platform
-		}
-	}
-
-	// invalid something...
 	return PlatformItem{Os: runtime.GOOS, Arch: runtime.GOARCH}
 }
 
