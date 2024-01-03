@@ -308,17 +308,24 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		fmt.Printf("\n>> compiling %s...\n", cmdBinName)
 
 		var compileError uint32 = 0
+
+		// local 플랫폼을 먼저 빌드한다, 이후 에러가 없을 경우 추가 플랫폼을 빌드한다
+		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, b.BuildCGOLink)
+		compileBinary(&compileError, compileRequest)
+		if compileError > 0 {
+			return fmt.Errorf("fail to prepare binary %s\n", cmdBinName)
+		}
+
+		// 추가 플랫폼을 빌드한다
 		wg := sync.WaitGroup{}
-		wg.Add(len(buildPlatformList.Platforms))
-		for _, platform := range buildPlatformList.Platforms {
-			request := BinCompileRequest{}
-			request.TargetDir = filepath.Join(b.workingDir, PlatformDirName, platform.getPlatformDirectory())
-			request.BinName = cmdBinName
-			request.BinSourcePath = cmdRecord.Path
-			request.Os = platform.Os
-			request.Arch = platform.Arch
-			request.BuildCGOLink = b.BuildCGOLink
-			go compileBinary(&wg, &compileError, request)
+		additionalPlatforms := buildPlatformList.GetAdditionalPlatforms()
+		wg.Add(len(additionalPlatforms))
+		for _, platform := range additionalPlatforms {
+			compileRequest = createCompileRequest(platform, cmdRecord, b.workingDir, b.BuildCGOLink)
+			go func() {
+				defer wg.Done()
+				compileBinary(&compileError, compileRequest)
+			}()
 		}
 		wg.Wait()
 
@@ -328,6 +335,17 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 	}
 
 	return nil
+}
+
+func createCompileRequest(platform PlatformItem, cmdRecord CmdRecord, workingDir, cgoLink string) BinCompileRequest {
+	request := BinCompileRequest{}
+	request.TargetDir = filepath.Join(workingDir, PlatformDirName, platform.getPlatformDirectory())
+	request.BinName = cmdRecord.GetBinaryname()
+	request.BinSourcePath = cmdRecord.Path
+	request.Os = platform.Os
+	request.Arch = platform.Arch
+	request.BuildCGOLink = cgoLink
+	return request
 }
 
 const (
@@ -344,9 +362,7 @@ type BinCompileRequest struct {
 }
 
 // compileBinary 바이너리를 컴파일한다
-func compileBinary(wg *sync.WaitGroup, compileError *uint32, request BinCompileRequest) {
-	defer wg.Done()
-
+func compileBinary(compileError *uint32, request BinCompileRequest) {
 	err := os.MkdirAll(request.TargetDir, 0744)
 	if err != nil {
 		if !errors.Is(err, os.ErrExist) {
