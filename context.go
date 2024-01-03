@@ -311,7 +311,7 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 
 		// local 플랫폼을 먼저 빌드한다, 이후 에러가 없을 경우 추가 플랫폼을 빌드한다
 		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, b.BuildCGOLink)
-		compileBinary(nil, &compileError, compileRequest)
+		compileBinary(&compileError, compileRequest)
 		if compileError > 0 {
 			return fmt.Errorf("fail to prepare binary %s\n", cmdBinName)
 		}
@@ -322,7 +322,10 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		wg.Add(len(additionalPlatforms))
 		for _, platform := range additionalPlatforms {
 			compileRequest = createCompileRequest(platform, cmdRecord, b.workingDir, b.BuildCGOLink)
-			go compileBinary(&wg, &compileError, compileRequest)
+			go func() {
+				defer wg.Done()
+				compileBinary(&compileError, compileRequest)
+			}()
 		}
 		wg.Wait()
 
@@ -359,11 +362,7 @@ type BinCompileRequest struct {
 }
 
 // compileBinary 바이너리를 컴파일한다
-func compileBinary(wg *sync.WaitGroup, compileError *uint32, request BinCompileRequest) {
-	if wg != nil {
-		defer wg.Done()
-	}
-
+func compileBinary(compileError *uint32, request BinCompileRequest) {
 	err := os.MkdirAll(request.TargetDir, 0744)
 	if err != nil {
 		if !errors.Is(err, os.ErrExist) {
