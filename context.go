@@ -321,10 +321,10 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		additionalPlatforms := buildPlatformList.GetAdditionalPlatforms()
 		wg.Add(len(additionalPlatforms))
 		for _, platform := range additionalPlatforms {
-			compileRequest = createCompileRequest(platform, cmdRecord, b.workingDir, b.BuildCGOLink)
+			nextCompileRequest := createCompileRequest(platform, cmdRecord, b.workingDir, b.BuildCGOLink)
 			go func() {
 				defer wg.Done()
-				compileBinary(&compileError, compileRequest)
+				compileBinary(&compileError, nextCompileRequest)
 			}()
 		}
 		wg.Wait()

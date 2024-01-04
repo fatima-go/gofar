@@ -36,7 +36,7 @@ positional arguments:
   cgo                   CC link e.g) x86_64-pc-linux-gcc
 `
 
-var version = "2.2.0"
+var version = "2.2.1"
 
 func Gofar() {
 	if len(os.Args) > 1 {
