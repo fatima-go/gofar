@@ -46,4 +46,5 @@ helloworld: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically
 
 # Release
 
-v2.2.0 : [로컬 플랫폼 먼저 컴파일](https://github.com/fatima-go/gofar/issues/11)
+- v2.2.1 : [잘못된 플랫폼 정보로 컴파일하는 버그 수정](https://github.com/fatima-go/gofar/issues/13)
+- v2.2.0 : [로컬 플랫폼 먼저 컴파일](https://github.com/fatima-go/gofar/issues/11)

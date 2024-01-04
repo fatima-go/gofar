@@ -113,9 +113,11 @@ func (y YamlBuildPlatformConfig) GetLocalPlatform() PlatformItem {
 func (y YamlBuildPlatformConfig) GetAdditionalPlatforms() []PlatformItem {
 	list := make([]PlatformItem, 0)
 	for _, platform := range y.Platforms {
+		fmt.Printf("platform : %s_%s\n", platform.Os, platform.Arch)
 		if platform.Os == runtime.GOOS && platform.Arch == runtime.GOARCH {
 			continue
 		}
+		fmt.Printf("add platform : %s_%s : %s\n", platform.Os, platform.Arch, platform.getPlatformDirectory())
 		list = append(list, platform)
 	}
 
