@@ -59,7 +59,6 @@ type BuildContext struct {
 	ProcessList       []CmdRecord
 	GitSupport        bool
 	ExposeProcessName string
-	BuildCGOLink      string
 	workingDir        string
 	procType          string
 	farPath           string
@@ -98,7 +97,7 @@ func (b *BuildContext) Packaging() error {
 
 	fmt.Printf("working directory : %s\n", b.workingDir)
 	defer func() {
-		os.RemoveAll(b.workingDir)
+		_ = os.RemoveAll(b.workingDir)
 	}()
 
 	err = b.prepareBinary()
@@ -310,7 +309,9 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		var compileError uint32 = 0
 
 		// local 플랫폼을 먼저 빌드한다, 이후 에러가 없을 경우 추가 플랫폼을 빌드한다
-		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, b.BuildCGOLink)
+
+		CgoCCLink := ""
+		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, CgoCCLink)
 		compileBinary(&compileError, compileRequest)
 		if compileError > 0 {
 			return fmt.Errorf("fail to prepare binary %s\n", cmdBinName)
@@ -321,7 +322,7 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		additionalPlatforms := buildPlatformList.GetAdditionalPlatforms()
 		wg.Add(len(additionalPlatforms))
 		for _, platform := range additionalPlatforms {
-			nextCompileRequest := createCompileRequest(platform, cmdRecord, b.workingDir, b.BuildCGOLink)
+			nextCompileRequest := createCompileRequest(platform, cmdRecord, b.workingDir, platform.CC)
 			go func() {
 				defer wg.Done()
 				compileBinary(&compileError, nextCompileRequest)
@@ -374,12 +375,18 @@ func compileBinary(compileError *uint32, request BinCompileRequest) {
 
 	targetBin := filepath.Join(request.TargetDir, request.BinName)
 	command := fmt.Sprintf("go build -o %s", targetBin)
-	if len(request.BuildCGOLink) == 0 {
-		command = fmt.Sprintf("GOOS=%s GOARCH=%s go build -o %s", request.Os, request.Arch, targetBin)
-	} else {
-		command = fmt.Sprintf("CC=%s GOOS=%s GOARCH=%s CGO_ENABLED=1 go build -o %s -ldflags='-s -w'",
-			request.BuildCGOLink, request.Os, request.Arch, targetBin)
+
+	command = fmt.Sprintf("GOOS=%s GOARCH=%s go build -o %s", request.Os, request.Arch, targetBin)
+	if cgoEnable {
+		if len(request.BuildCGOLink) > 0 {
+			command = fmt.Sprintf("CC=%s %s", request.BuildCGOLink, command)
+		}
+		command = fmt.Sprintf("CGO_ENABLED=1 %s", command)
+		if stripEnable {
+			command = fmt.Sprintf("%s -ldflags='-s -w'", command)
+		}
 	}
+
 	fmt.Printf("%s\n", command)
 	out, err := ExecuteShell(request.BinSourcePath, command)
 	if err != nil {
@@ -397,16 +404,13 @@ func compileBinary(compileError *uint32, request BinCompileRequest) {
 	_ = os.Chmod(targetBin, 0755)
 }
 
-func NewBuildContext(procName, cgoLink string) (*BuildContext, error) {
+func NewBuildContext(procName string) (*BuildContext, error) {
 	loadPlatform()
 
 	ctx := &BuildContext{}
 	ctx.GitSupport = false
 	ctx.ExposeProcessName = procName
 	ctx.procType = procTypeGeneral
-	if len(cgoLink) > 0 {
-		ctx.BuildCGOLink = cgoLink
-	}
 
 	err := determineProjectBaseDir(ctx)
 	if err != nil {

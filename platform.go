@@ -125,6 +125,7 @@ func (y YamlBuildPlatformConfig) GetAdditionalPlatforms() []PlatformItem {
 type PlatformItem struct {
 	Os   string `yaml:"os"`
 	Arch string `yaml:"arch"`
+	CC   string `yaml:"cc,omitempty"`
 }
 
 // getPlatformDirectory os_arch 형태의 플랫폼 구분 디렉토리명을 구한다
