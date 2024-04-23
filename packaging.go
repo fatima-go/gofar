@@ -26,17 +26,22 @@ import (
 	"os"
 )
 
-var usage = `usage: %s process_name cgo
+var usage = `usage: %s [option] process_name
 usage: %s version
 
 golang fatima package builder
 
 positional arguments:
   process_name          process(program) name
-  cgo                   CC link e.g) x86_64-pc-linux-gcc
+
+optional arguments:
+  -c    CGO Enable
+  -s    Strip library while CGO enable
 `
 
-var version = "2.2.1"
+var cgoEnable = false
+var stripEnable = false
+var version = "2.3.0"
 
 func Gofar() {
 	if len(os.Args) > 1 {
@@ -50,6 +55,9 @@ func Gofar() {
 		fmt.Printf(usage, os.Args[0], os.Args[0])
 	}
 
+	flag.BoolVar(&cgoEnable, "c", false, "CGO enable")
+	flag.BoolVar(&stripEnable, "s", false, "CGO enable")
+
 	flag.Parse()
 	if len(flag.Args()) < 1 {
 		flag.Usage()
@@ -57,12 +65,8 @@ func Gofar() {
 	}
 
 	processName := flag.Args()[0]
-	cgoLink := ""
-	if len(flag.Args()) >= 2 {
-		cgoLink = flag.Args()[1]
-	}
 
-	ctx, err := NewBuildContext(processName, cgoLink)
+	ctx, err := NewBuildContext(processName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "packaging error : %s", err.Error())
 		return
