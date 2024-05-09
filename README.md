@@ -1,6 +1,12 @@
 # gofar
 
-gofar tools is ...
+gofar 는 golang 프로그램을 fatima 환경에 배포하기 위해 빌드를 도와주는 툴이다.
+
+# Release
+
+- v2.3.0 : [CGO 크로스 컴파일 환경 지원](https://github.com/fatima-go/gofar/issues/15)
+- v2.2.1 : [잘못된 플랫폼 정보로 컴파일하는 버그 수정](https://github.com/fatima-go/gofar/issues/13)
+- v2.2.0 : [로컬 플랫폼 먼저 컴파일](https://github.com/fatima-go/gofar/issues/11)
 
 # platforms for compiling
 
@@ -19,6 +25,20 @@ platform_list:
     arch: amd64
   - os: linux
     arch: arm64
+  - os: darwin
+    arch: arm64
+```
+
+만약 크로스 컴파일을 위해 별도의 CC 를 지정하려면 각 플랫폼별로 알맞는 컴파일러를 등록해 둔다
+
+```yaml
+platform_list:
+  - os: linux
+    arch: amd64
+    cc: x86_64-pc-linux-gcc
+  - os: linux
+    arch: arm64
+    cc: aarch64-unknown-linux-gnu-gcc
   - os: darwin
     arch: arm64
 ```
@@ -43,8 +63,3 @@ $ ls -l platform/linux_arm64
 $ file platform/linux_arm64/helloworld
 helloworld: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically linked, not stripped
 ```
-
-# Release
-
-- v2.2.1 : [잘못된 플랫폼 정보로 컴파일하는 버그 수정](https://github.com/fatima-go/gofar/issues/13)
-- v2.2.0 : [로컬 플랫폼 먼저 컴파일](https://github.com/fatima-go/gofar/issues/11)
