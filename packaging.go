@@ -41,7 +41,7 @@ optional arguments:
 
 var cgoEnable = false
 var stripEnable = false
-var version = "2.3.0"
+var version = "2.3.1"
 
 func Gofar() {
 	if len(os.Args) > 1 {

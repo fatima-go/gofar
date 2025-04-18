@@ -23,7 +23,14 @@ package main
 import (
 	"fmt"
 	"github.com/go-git/go-git/v5"
+	"strings"
 )
+
+const (
+	refHeadPrefix = "refs/heads/"
+)
+
+var refHeadPrefixLen = len(refHeadPrefix)
 
 type GitInfo struct {
 	Valid             bool
@@ -57,14 +64,11 @@ func readGitInfo(baseDir string) GitInfo {
 
 	gitInfo.BranchName = ref.Name().String()
 	// BranchName likes : refs/heads/enhancement/git_commit_message
-	if len(gitInfo.BranchName) > 11 {
-		gitInfo.BranchName = gitInfo.BranchName[11:]
+	if len(gitInfo.BranchName) > refHeadPrefixLen && strings.HasPrefix(gitInfo.BranchName, refHeadPrefix) {
+		gitInfo.BranchName = gitInfo.BranchName[refHeadPrefixLen:]
 	}
-	// ... retrieves the commit history
 	gitInfo.CommitHash = ref.Hash().String()
-	if len(gitInfo.CommitHash) > 12 {
-		gitInfo.CommitHash = gitInfo.CommitHash[:12]
-	}
+	// ... retrieves the commit history
 	cIter, err := gitRepo.Log(&git.LogOptions{From: ref.Hash()})
 	if err != nil {
 		fmt.Printf("reference log loading error : %s", err.Error())
