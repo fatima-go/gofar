@@ -34,6 +34,7 @@ var refHeadPrefixLen = len(refHeadPrefix)
 
 type GitInfo struct {
 	Valid             bool
+	RepoUrl           string
 	BranchName        string
 	CommitHash        string
 	LastCommitMessage string
@@ -41,6 +42,9 @@ type GitInfo struct {
 
 func (g GitInfo) ToMap() map[string]string {
 	m := make(map[string]string)
+	if len(g.RepoUrl) > 0 {
+		m["repo"] = g.RepoUrl
+	}
 	m["branch"] = g.BranchName
 	m["commit"] = g.CommitHash
 	m["message"] = g.LastCommitMessage
@@ -60,6 +64,11 @@ func readGitInfo(baseDir string) GitInfo {
 	if err != nil {
 		fmt.Printf("repo.Head error : %s", err.Error())
 		return gitInfo
+	}
+
+	remote, err := gitRepo.Remote("origin")
+	if err == nil && len(remote.Config().URLs[0]) > 0 {
+		gitInfo.RepoUrl = remote.Config().URLs[0]
 	}
 
 	gitInfo.BranchName = ref.Name().String()

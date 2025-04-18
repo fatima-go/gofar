@@ -4,6 +4,7 @@ gofar 는 golang 프로그램을 fatima 환경에 배포하기 위해 빌드를 
 
 # Release
 
+- v2.4.0 : [빌드시 git 정보에 repo 정보 추가](https://github.com/fatima-go/gofar/issues/20)
 - v2.3.1 : [배포정보의 git 관련 정보 수정](https://github.com/fatima-go/gofar/issues/18)
 - v2.3.0 : [CGO 크로스 컴파일 환경 지원](https://github.com/fatima-go/gofar/issues/15)
 - v2.2.1 : [잘못된 플랫폼 정보로 컴파일하는 버그 수정](https://github.com/fatima-go/gofar/issues/13)
