@@ -36,12 +36,12 @@ positional arguments:
 
 optional arguments:
   -c    CGO Enable
-  -s    Strip library while CGO enable
+  -s    Strip library while compiling
 `
 
 var cgoEnable = false
 var stripEnable = false
-var version = "2.4.0"
+var version = "2.5.0"
 
 func Gofar() {
 	if len(os.Args) > 1 {
