@@ -382,9 +382,9 @@ func compileBinary(compileError *uint32, request BinCompileRequest) {
 			command = fmt.Sprintf("CC=%s %s", request.BuildCGOLink, command)
 		}
 		command = fmt.Sprintf("CGO_ENABLED=1 %s", command)
-		if stripEnable {
-			command = fmt.Sprintf("%s -ldflags='-s -w'", command)
-		}
+	}
+	if stripEnable {
+		command = fmt.Sprintf("%s -ldflags='-s -w'", command)
 	}
 
 	fmt.Printf("%s\n", command)
