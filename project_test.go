@@ -169,20 +169,111 @@ func TestParseEmptyDocuments(t *testing.T) {
 	assert.Empty(t, config.Profiles)
 }
 
+func writeProjectConfig(t *testing.T, base, name, content string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(base, ProjectConfigDir), 0755))
+	path := filepath.Join(base, ProjectConfigDir, name)
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	return path
+}
+
 func TestLoadProjectConfig(t *testing.T) {
 	base := t.TempDir()
-	config, err := loadProjectConfig(base)
+	config, warnings, err := loadProjectConfig(base, "knowledgesvc")
 	require.NoError(t, err)
 	assert.Nil(t, config, "no config file")
+	assert.Empty(t, warnings)
 
-	require.NoError(t, os.MkdirAll(filepath.Join(base, ProjectConfigDir), 0755))
-	path := filepath.Join(base, ProjectConfigDir, ProjectConfigFile)
-	require.NoError(t, os.WriteFile(path, []byte(knowledgeConfig), 0644))
-	config, err = loadProjectConfig(base)
+	// 공통 설정만 있으면 공통 설정을 사용한다
+	common := writeProjectConfig(t, base, ProjectConfigFile, knowledgeConfig)
+	config, warnings, err = loadProjectConfig(base, "knowledgesvc")
 	require.NoError(t, err)
 	require.NotNil(t, config)
-	assert.Equal(t, path, config.Path)
+	assert.Equal(t, common, config.Path)
 	assert.Contains(t, config.Profiles, "local")
+	assert.Empty(t, warnings)
+
+	// process 설정이 있으면 공통 설정보다 우선한다 (병합하지 않는다)
+	own := writeProjectConfig(t, base, "knowledgesvc.yaml", "build:\n  strip: all\n")
+	config, warnings, err = loadProjectConfig(base, "knowledgesvc")
+	require.NoError(t, err)
+	assert.Equal(t, own, config.Path)
+	assert.Equal(t, StripAll, config.Build.Strip)
+	assert.Empty(t, config.Profiles)
+	assert.Empty(t, warnings)
+
+	// 다른 process 설정만 있으면 공통 설정을 사용하되 경고한다
+	config, warnings, err = loadProjectConfig(base, "other")
+	require.NoError(t, err)
+	assert.Equal(t, common, config.Path)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "other.yaml not found")
+	assert.Contains(t, warnings[0], "knowledgesvc.yaml")
+
+	// 공통 설정도 없으면 설정 없이 빌드하되 경고한다
+	require.NoError(t, os.Remove(common))
+	config, warnings, err = loadProjectConfig(base, "other")
+	require.NoError(t, err)
+	assert.Nil(t, config)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "build without project config")
+}
+
+func TestLoadProjectConfigIgnoresUnsafeProcessName(t *testing.T) {
+	base := t.TempDir()
+	writeProjectConfig(t, base, ProjectConfigFile, "build:\n  strip: tools\n")
+	require.NoError(t, os.WriteFile(filepath.Join(base, "evil.yaml"), []byte("build:\n  strip: all\n"), 0644))
+	for _, name := range []string{"../evil", ".hidden", "a/b"} {
+		config, _, err := loadProjectConfig(base, name)
+		require.NoError(t, err)
+		assert.Equal(t, StripTools, config.Build.Strip, name)
+	}
+}
+
+func TestLoadProjectConfigInvalidProcessFile(t *testing.T) {
+	base := t.TempDir()
+	writeProjectConfig(t, base, ProjectConfigFile, "build:\n  strip: tools\n")
+	writeProjectConfig(t, base, "svc.yaml", "build:\n  strip: wrong\n")
+	_, _, err := loadProjectConfig(base, "svc")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "svc.yaml")
+}
+
+func TestResolveWarnsMissingProcessBinary(t *testing.T) {
+	config, err := parseProjectConfig([]byte("build:\n  strip: tools\n"))
+	require.NoError(t, err)
+	plan, err := config.Resolve([]string{"tool-a", "tool-b"}, "svc", false)
+	require.NoError(t, err)
+	require.Len(t, plan.Warnings, 1)
+	assert.Contains(t, plan.Warnings[0], "process binary svc not found")
+	assert.True(t, plan.Specs["tool-a"].Strip)
+}
+
+func TestApplyProjectConfigPerProcess(t *testing.T) {
+	// 한 프로젝트에 process 가 2개인 경우 각자의 설정으로 서로를 제외한다
+	base := t.TempDir()
+	names := []string{"svc-a", "svc-b", "shared-tool"}
+	writeProjectConfig(t, base, "svc-a.yaml", "build:\n  exclude: [svc-b]\n  strip: tools\n")
+	writeProjectConfig(t, base, "svc-b.yaml", "build:\n  exclude: [svc-a]\n")
+
+	build := func(process string) *BuildContext {
+		ctx := &BuildContext{ProjectBaseDir: base, ExposeProcessName: process}
+		for _, name := range names {
+			ctx.ProcessList = append(ctx.ProcessList, CmdRecord{Path: filepath.Join(base, "cmd", name)})
+		}
+		require.NoError(t, applyProjectConfig(ctx))
+		return ctx
+	}
+
+	a := build("svc-a")
+	assert.Equal(t, []string{"svc-b"}, a.ExcludedBinaries)
+	assert.Equal(t, BinaryRoleProcess, a.binarySpecs["svc-a"].Role)
+	assert.True(t, a.isStripBinary("shared-tool"))
+
+	b := build("svc-b")
+	assert.Equal(t, []string{"svc-a"}, b.ExcludedBinaries)
+	assert.Equal(t, BinaryRoleProcess, b.binarySpecs["svc-b"].Role)
+	assert.False(t, b.isStripBinary("shared-tool"))
 }
 
 func TestApplyProjectConfig(t *testing.T) {
