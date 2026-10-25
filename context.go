@@ -59,9 +59,20 @@ type BuildContext struct {
 	ProcessList       []CmdRecord
 	GitSupport        bool
 	ExposeProcessName string
+	ProjectConfig     *ProjectConfig
+	ExcludedBinaries  []string
+	binarySpecs       map[string]BinarySpec
 	workingDir        string
 	procType          string
 	farPath           string
+}
+
+// isStripBinary 바이너리의 strip 여부를 구한다. 프로젝트 설정이 없으면 -s 옵션을 따른다
+func (b BuildContext) isStripBinary(binName string) bool {
+	if b.binarySpecs == nil {
+		return stripEnable
+	}
+	return b.binarySpecs[binName].Strip
 }
 
 func (b BuildContext) Print() {
@@ -85,6 +96,22 @@ func (b BuildContext) Print() {
 		fmt.Printf("binary : %s\n", binList)
 	} else {
 		fmt.Printf("binary process : %s\n", b.ExposeProcessName)
+	}
+
+	if b.ProjectConfig != nil {
+		fmt.Printf("project config : %s\n", b.ProjectConfig.Path)
+		if len(b.ExcludedBinaries) > 0 {
+			fmt.Printf("build excluded : %s\n", strings.Join(b.ExcludedBinaries, ","))
+		}
+		stripList := make([]string, 0)
+		for _, v := range b.ProcessList {
+			if b.isStripBinary(v.GetBinaryname()) {
+				stripList = append(stripList, v.GetBinaryname())
+			}
+		}
+		if len(stripList) > 0 {
+			fmt.Printf("strip : %s\n", strings.Join(stripList, ","))
+		}
 	}
 }
 
@@ -183,6 +210,10 @@ func (b *BuildContext) createDeployment() error {
 		}
 	}
 	m["build"] = build
+	if b.binarySpecs != nil {
+		// 프로젝트 설정(.gofar/gofar.yaml)이 있을 때만 바이너리별 정책을 기록한다
+		m["binaries"] = b.binarySpecs
+	}
 	dat, err := json.Marshal(m)
 	if err != nil {
 		return fmt.Errorf("fail to create deployment : %s", err.Error())
@@ -311,7 +342,8 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		// local 플랫폼을 먼저 빌드한다, 이후 에러가 없을 경우 추가 플랫폼을 빌드한다
 
 		CgoCCLink := ""
-		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, CgoCCLink)
+		strip := b.isStripBinary(cmdBinName)
+		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, CgoCCLink, strip)
 		compileBinary(&compileError, compileRequest)
 		if compileError > 0 {
 			return fmt.Errorf("fail to prepare binary %s\n", cmdBinName)
@@ -322,7 +354,7 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		additionalPlatforms := buildPlatformList.GetAdditionalPlatforms()
 		wg.Add(len(additionalPlatforms))
 		for _, platform := range additionalPlatforms {
-			nextCompileRequest := createCompileRequest(platform, cmdRecord, b.workingDir, platform.CC)
+			nextCompileRequest := createCompileRequest(platform, cmdRecord, b.workingDir, platform.CC, strip)
 			go func() {
 				defer wg.Done()
 				compileBinary(&compileError, nextCompileRequest)
@@ -338,8 +370,9 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 	return nil
 }
 
-func createCompileRequest(platform PlatformItem, cmdRecord CmdRecord, workingDir, cgoLink string) BinCompileRequest {
+func createCompileRequest(platform PlatformItem, cmdRecord CmdRecord, workingDir, cgoLink string, strip bool) BinCompileRequest {
 	request := BinCompileRequest{}
+	request.Strip = strip
 	request.TargetDir = filepath.Join(workingDir, PlatformDirName, platform.getPlatformDirectory())
 	request.BinName = cmdRecord.GetBinaryname()
 	request.BinSourcePath = cmdRecord.Path
@@ -360,6 +393,7 @@ type BinCompileRequest struct {
 	Os            string
 	Arch          string
 	BuildCGOLink  string
+	Strip         bool
 }
 
 // compileBinary 바이너리를 컴파일한다
@@ -383,7 +417,7 @@ func compileBinary(compileError *uint32, request BinCompileRequest) {
 		}
 		command = fmt.Sprintf("CGO_ENABLED=1 %s", command)
 	}
-	if stripEnable {
+	if request.Strip {
 		command = fmt.Sprintf("%s -ldflags='-s -w'", command)
 	}
 
@@ -420,7 +454,49 @@ func NewBuildContext(procName string) (*BuildContext, error) {
 	determineResourceDir(ctx)
 	determineCmdList(ctx)
 
+	err = applyProjectConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fail to apply project config. %s", err.Error())
+	}
+
 	return ctx, nil
+}
+
+// applyProjectConfig 프로젝트 설정(.gofar/gofar.yaml)이 있으면 빌드 대상과 바이너리별 정책을 결정한다
+func applyProjectConfig(ctx *BuildContext) error {
+	config, err := loadProjectConfig(ctx.ProjectBaseDir)
+	if err != nil {
+		return err
+	}
+	if config == nil {
+		return nil
+	}
+
+	binaryNames := make([]string, 0, len(ctx.ProcessList))
+	for _, record := range ctx.ProcessList {
+		binaryNames = append(binaryNames, record.GetBinaryname())
+	}
+
+	plan, err := config.Resolve(binaryNames, ctx.ExposeProcessName, stripEnable)
+	if err != nil {
+		return err
+	}
+	for _, warning := range plan.Warnings {
+		fmt.Printf("warning : %s\n", warning)
+	}
+
+	processList := make([]CmdRecord, 0, len(plan.Specs))
+	for _, record := range ctx.ProcessList {
+		if _, ok := plan.Specs[record.GetBinaryname()]; ok {
+			processList = append(processList, record)
+		}
+	}
+
+	ctx.ProjectConfig = config
+	ctx.ExcludedBinaries = plan.Excluded
+	ctx.ProcessList = processList
+	ctx.binarySpecs = plan.Specs
+	return nil
 }
 
 func determineResourceDir(ctx *BuildContext) {

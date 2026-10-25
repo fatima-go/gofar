@@ -37,11 +37,14 @@ positional arguments:
 optional arguments:
   -c    CGO Enable
   -s    Strip library while compiling
+
+project config:
+  .gofar/gofar.yaml in project base dir (optional). see README
 `
 
 var cgoEnable = false
 var stripEnable = false
-var version = "2.5.0"
+var version = "2.6.0"
 
 func Gofar() {
 	if len(os.Args) > 1 {
