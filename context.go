@@ -462,9 +462,12 @@ func NewBuildContext(procName string) (*BuildContext, error) {
 	return ctx, nil
 }
 
-// applyProjectConfig 프로젝트 설정(.gofar/gofar.yaml)이 있으면 빌드 대상과 바이너리별 정책을 결정한다
+// applyProjectConfig 프로젝트 설정(.gofar/<process>.yaml 또는 .gofar/gofar.yaml)이 있으면 빌드 대상과 바이너리별 정책을 결정한다
 func applyProjectConfig(ctx *BuildContext) error {
-	config, err := loadProjectConfig(ctx.ProjectBaseDir)
+	config, warnings, err := loadProjectConfig(ctx.ProjectBaseDir, ctx.ExposeProcessName)
+	for _, warning := range warnings {
+		fmt.Printf("warning : %s\n", warning)
+	}
 	if err != nil {
 		return err
 	}

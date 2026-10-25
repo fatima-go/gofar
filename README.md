@@ -4,6 +4,7 @@ gofar 는 golang 프로그램을 fatima 환경에 배포하기 위해 빌드를 
 
 # Release
 
+- v2.7.0 : process 별 프로젝트 설정(.gofar/<process_name>.yaml) 지원 - 한 프로젝트의 여러 process 를 각자의 설정으로 빌드
 - v2.6.0 : 프로젝트별 설정(.gofar/gofar.yaml) 지원 - 바이너리별 빌드 제외, strip, profile 별 설치 정책
 - v2.5.0 : [lib strip 옵션 지원](https://github.com/fatima-go/gofar/issues/22)
 - v2.4.0 : [빌드시 git 정보에 repo 정보 추가](https://github.com/fatima-go/gofar/issues/20)
@@ -70,11 +71,26 @@ helloworld: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically
 
 # project config
 
-`$HOME/.fatima/gofar.yaml` 이 빌드 플랫폼 같은 전역 설정이라면, 프로젝트 디렉토리의 `.gofar/gofar.yaml` 은 해당 프로젝트 전용 설정이다.<br>
+`$HOME/.fatima/gofar.yaml` 이 빌드 플랫폼 같은 전역 설정이라면, 프로젝트 디렉토리의 `.gofar/` 하위 설정은 해당 프로젝트 전용 설정이다.<br>
 `cmd` 하위에 바이너리가 여러개인 프로젝트에서 바이너리별로 빌드 제외, strip, 배포 환경(profile)별 설치 여부를 지정한다.<br>
-파일이 없으면 기존과 동일하게 동작한다.
+설정 파일이 없으면 기존과 동일하게 동작한다.
 
-공통 문서 1개와 profile 문서(`fatima.profile`) N개로 구성된 multi-doc yaml 이다.
+`gofar process_name` 실행시 아래 순서로 설정 파일 1개를 사용한다 (병합하지 않는다).
+
+1. `.gofar/<process_name>.yaml` : 해당 process(far) 전용 설정
+2. `.gofar/gofar.yaml` : 공통 설정
+
+```
+.gofar/
+  knowledgesvc.yaml   <- gofar knowledgesvc
+  other-svc.yaml      <- gofar other-svc
+  gofar.yaml          <- process 전용 설정이 없을 때 (선택)
+```
+
+한 프로젝트에 process 가 여러개라면 process 별 파일로 관리한다. 설정은 해당 process 기준으로 작성하며, 다른 process 의 바이너리는 보통 `build.exclude` 로 제외한다.<br>
+process 별 파일이 있는데 실행한 process 의 파일이 없어 공통 설정을 쓰거나 설정 없이 빌드하는 경우 경고한다.
+
+설정 파일은 공통 문서 1개와 profile 문서(`fatima.profile`) N개로 구성된 multi-doc yaml 이다.
 
 ```yaml
 ---
@@ -95,7 +111,7 @@ install:
   include: [knowledge-backfill, knowledge-scope-review]
 ```
 
-- process 바이너리는 gofar 실행시 지정한 process_name 과 이름이 같은 바이너리이며, 나머지는 tool 로 취급한다
+- process 바이너리는 gofar 실행시 지정한 process_name 과 이름이 같은 바이너리이며, 나머지는 tool 로 취급한다 (해당 바이너리가 없으면 경고)
 - 빌드는 profile 과 무관하게 1번만 수행하므로 `build` 는 공통 문서에만 둘 수 있다
 - 다음의 경우 빌드를 중단한다
   - 존재하지 않는 바이너리 이름 또는 알 수 없는 키

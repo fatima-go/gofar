@@ -44,29 +44,20 @@ const (
 	BinaryRoleTool    = "tool"
 )
 
-/*
-.gofar/gofar.yaml 은 공통 문서 1개와 profile 문서 N개로 구성된 multi-doc yaml 이다.
-빌드는 profile 과 무관하게 1번만 수행되므로 build 는 공통 문서에만 둘 수 있다.
-
----
-build:
-
-	exclude: [knowcli]          # 빌드도, far 포함도 하지 않는다
-	strip: tools                # none(기본) | tools(process 외 바이너리) | all
-
-install:
-
-	exclude: [knowledge-backfill] # far 에는 포함하지만 기본적으로 설치하지 않는다
-
----
-fatima:
-
-	profile: local
-
-install:
-
-	include: [knowledge-backfill] # local profile 에서는 설치한다
-*/
+// projectDocument 프로젝트 설정 파일의 yaml 문서. 설정 파일은 공통 문서 1개와 profile 문서 N개로 구성된
+// multi-doc yaml 이며, 빌드는 profile 과 무관하게 1번만 수행되므로 build 는 공통 문서에만 둘 수 있다.
+//
+//	---
+//	build:
+//	  exclude: [knowcli]            # 빌드도, far 포함도 하지 않는다
+//	  strip: tools                  # none(기본) | tools(process 외 바이너리) | all
+//	install:
+//	  exclude: [knowledge-backfill] # far 에는 포함하지만 기본적으로 설치하지 않는다
+//	---
+//	fatima:
+//	  profile: local
+//	install:
+//	  include: [knowledge-backfill] # local profile 에서는 설치한다
 type projectDocument struct {
 	Fatima  *projectFatima  `yaml:"fatima"`
 	Build   *projectBuild   `yaml:"build"`
@@ -115,23 +106,71 @@ type BinaryPlan struct {
 	Warnings []string
 }
 
-// loadProjectConfig 프로젝트의 .gofar/gofar.yaml 을 로드한다. 파일이 없으면 nil 을 리턴한다
-func loadProjectConfig(projectBaseDir string) (*ProjectConfig, error) {
-	path := filepath.Join(projectBaseDir, ProjectConfigDir, ProjectConfigFile)
-	data, err := os.ReadFile(path)
-	if err != nil {
+// loadProjectConfig 빌드할 process 의 프로젝트 설정을 로드한다.
+// .gofar/<process>.yaml 을 우선 사용하고, 없으면 공통 설정 .gofar/gofar.yaml 을 사용한다 (두 파일을 병합하지 않는다).
+// 둘 다 없으면 nil 을 리턴한다. 다른 process 의 설정 파일만 있는 경우 등은 warnings 로 알린다
+func loadProjectConfig(projectBaseDir, processName string) (*ProjectConfig, []string, error) {
+	configDir := filepath.Join(projectBaseDir, ProjectConfigDir)
+	warnings := make([]string, 0)
+	others := otherProcessConfigFiles(configDir, processName)
+
+	candidates := make([]string, 0, 2)
+	if isSafeProcessFileName(processName) {
+		candidates = append(candidates, filepath.Join(configDir, processName+".yaml"))
+	}
+	candidates = append(candidates, filepath.Join(configDir, ProjectConfigFile))
+
+	for i, path := range candidates {
+		data, err := os.ReadFile(path)
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+			continue
 		}
-		return nil, fmt.Errorf("fail to read %s : %s", path, err.Error())
+		if err != nil {
+			return nil, warnings, fmt.Errorf("fail to read %s : %s", path, err.Error())
+		}
+
+		config, err := parseProjectConfig(data)
+		if err != nil {
+			return nil, warnings, fmt.Errorf("invalid %s : %s", path, err.Error())
+		}
+		config.Path = path
+
+		isCommon := i == len(candidates)-1
+		if isCommon && len(others) > 0 {
+			warnings = append(warnings, fmt.Sprintf("%s.yaml not found. common %s is used although process configs exist (%s)",
+				processName, ProjectConfigFile, strings.Join(others, ",")))
+		}
+		return config, warnings, nil
 	}
 
-	config, err := parseProjectConfig(data)
-	if err != nil {
-		return nil, fmt.Errorf("invalid %s : %s", path, err.Error())
+	if len(others) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%s.yaml not found. build without project config although process configs exist (%s)",
+			processName, strings.Join(others, ",")))
 	}
-	config.Path = path
-	return config, nil
+	return nil, warnings, nil
+}
+
+// otherProcessConfigFiles 다른 process 의 설정 파일 목록을 구한다
+func otherProcessConfigFiles(configDir, processName string) []string {
+	files := make([]string, 0)
+	entries, err := os.ReadDir(configDir)
+	if err != nil {
+		return files
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".yaml") || name == ProjectConfigFile || name == processName+".yaml" {
+			continue
+		}
+		files = append(files, name)
+	}
+	sort.Strings(files)
+	return files
+}
+
+// isSafeProcessFileName process 이름을 설정 파일 이름으로 사용할 수 있는지 확인한다
+func isSafeProcessFileName(processName string) bool {
+	return processName != "" && !strings.HasPrefix(processName, ".") && filepath.Base(processName) == processName
 }
 
 func parseProjectConfig(data []byte) (*ProjectConfig, error) {
@@ -230,6 +269,10 @@ func (p *ProjectConfig) Resolve(binaryNames []string, processName string, forceS
 	}
 
 	plan := &BinaryPlan{Specs: make(map[string]BinarySpec)}
+	if !known[processName] {
+		plan.Warnings = append(plan.Warnings,
+			fmt.Sprintf("process binary %s not found. every binary is treated as tool", processName))
+	}
 	for _, name := range binaryNames {
 		if buildExcluded[name] {
 			plan.Excluded = append(plan.Excluded, name)
