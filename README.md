@@ -4,6 +4,7 @@ gofar 는 golang 프로그램을 fatima 환경에 배포하기 위해 빌드를 
 
 # Release
 
+- v2.8.0 : 프로젝트 설정에 CGO 활성화(build.cgo) 지원 - -c 옵션 없이도 CGO 빌드, 프로젝트 설정의 알 수 없는 키는 에러 대신 경고 후 무시
 - v2.7.0 : process 별 프로젝트 설정(.gofar/<process_name>.yaml) 지원 - 한 프로젝트의 여러 process 를 각자의 설정으로 빌드
 - v2.6.0 : 프로젝트별 설정(.gofar/gofar.yaml) 지원 - 바이너리별 빌드 제외, strip, profile 별 설치 정책
 - v2.5.0 : [lib strip 옵션 지원](https://github.com/fatima-go/gofar/issues/22)
@@ -100,6 +101,8 @@ build:
   exclude: [knowcli, guide-bundle, knowledge-verify]
   # none(기본) | tools(process 외 바이너리) | all. -s 옵션은 all 과 같다
   strip: tools
+  # true 이면 -c 옵션 없이도 CGO 를 활성화한다 (기본 false). cgo 를 쓰는 프로젝트라면 지정해 둔다
+  cgo: true
 install:
   # far 에는 포함하지만 기본적으로 설치하지 않는 바이너리
   exclude: [knowledge-backfill, knowledge-scope-review]
@@ -113,11 +116,13 @@ install:
 
 - process 바이너리는 gofar 실행시 지정한 process_name 과 이름이 같은 바이너리이며, 나머지는 tool 로 취급한다 (해당 바이너리가 없으면 경고)
 - 빌드는 profile 과 무관하게 1번만 수행하므로 `build` 는 공통 문서에만 둘 수 있다
+- `build.cgo: true` 이면 `-c` 옵션을 준 것과 같다. 크로스 컴파일 대상 플랫폼에 `cc` 가 지정되어 있지 않으면 경고한다 (위의 platforms for compiling 참고)
 - 다음의 경우 빌드를 중단한다
-  - 존재하지 않는 바이너리 이름 또는 알 수 없는 키
+  - 존재하지 않는 바이너리 이름 또는 잘못된 값
   - process 바이너리를 빌드 또는 설치에서 제외
   - `build.exclude` 된 바이너리를 `install` 에 지정
   - 공통 문서가 2개 이상이거나 같은 profile 문서가 중복
+- 알 수 없는 키는 상위 버전 gofar 의 설정일 수 있으므로 무시하고 경고한다. 오타일 수 있으니 경고를 확인한다
 - `install.exclude` 했지만 어떤 profile 에서도 include 하지 않은 바이너리는 `build.exclude` 로 옮기라고 경고한다
 
 설정이 있으면 `deployment.json` 에 바이너리별 정책(`binaries`)을 기록한다.<br>
