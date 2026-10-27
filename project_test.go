@@ -143,7 +143,6 @@ func TestParseErrors(t *testing.T) {
 		config string
 		want   string
 	}{
-		{"unknown key", "build:\n  exclud: [a]\n", "exclud"},
 		{"unknown strip", "build:\n  strip: some\n", "unknown build.strip"},
 		{"build in profile", "fatima:\n  profile: local\nbuild:\n  strip: all\n", "build is not allowed in profile"},
 		{"duplicated profile", "---\nfatima:\n  profile: qa\n---\nfatima:\n  profile: qa\n", "duplicated profile"},
@@ -160,6 +159,38 @@ func TestParseErrors(t *testing.T) {
 			assert.Contains(t, err.Error(), c.want)
 		})
 	}
+}
+
+func TestParseIgnoresUnknownFields(t *testing.T) {
+	// 상위 버전 gofar 의 설정이나 오타는 무시하고 경고한다
+	config, err := parseProjectConfig([]byte("---\nbuild:\n  exclud: [a]\n  strip: tools\n  future: {x: 1}\nversion: 3\n---\nfatima:\n  profile: qa\n  zone: kr\ninstall:\n  include: [b]\n"))
+	require.NoError(t, err)
+	assert.Equal(t, StripTools, config.Build.Strip)
+	assert.Empty(t, config.Build.Exclude)
+	assert.Equal(t, []string{"b"}, config.Profiles["qa"].Include)
+	require.Len(t, config.Warnings, 4)
+	assert.Contains(t, config.Warnings[0], "document 1 line 3 : unknown field build.exclud is ignored")
+	assert.Contains(t, config.Warnings[1], "document 1 line 5 : unknown field build.future is ignored")
+	assert.Contains(t, config.Warnings[2], "document 1 line 6 : unknown field version is ignored")
+	assert.Contains(t, config.Warnings[3], "document 2 line 10 : unknown field fatima.zone is ignored")
+
+	config, err = parseProjectConfig([]byte(knowledgeConfig))
+	require.NoError(t, err)
+	assert.Empty(t, config.Warnings)
+
+	// 알려진 키의 값이 잘못된 경우는 여전히 에러
+	_, err = parseProjectConfig([]byte("build:\n  cgo: maybe\n"))
+	assert.Error(t, err)
+}
+
+func TestLoadProjectConfigUnknownFieldWarning(t *testing.T) {
+	base := t.TempDir()
+	path := writeProjectConfig(t, base, "svc.yaml", "build:\n  strip: tools\n  future: true\n")
+	config, warnings, err := loadProjectConfig(base, "svc")
+	require.NoError(t, err)
+	assert.Equal(t, StripTools, config.Build.Strip)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], path+" : document 1 line 3 : unknown field build.future is ignored")
 }
 
 func TestParseEmptyDocuments(t *testing.T) {
@@ -303,4 +334,49 @@ func TestApplyProjectConfig(t *testing.T) {
 	}
 	assert.False(t, ctx.isStripBinary("knowledgesvc"))
 	assert.True(t, ctx.isStripBinary("knowledge-query"))
+}
+
+func TestCgoEnabled(t *testing.T) {
+	defer func() { cgoEnable = false }()
+
+	// 프로젝트 설정이 없으면 -c 옵션을 따른다
+	ctx := BuildContext{}
+	assert.False(t, ctx.isCgoEnabled())
+	cgoEnable = true
+	assert.True(t, ctx.isCgoEnabled())
+	cgoEnable = false
+
+	config, err := parseProjectConfig([]byte("build:\n  cgo: true\n"))
+	require.NoError(t, err)
+	ctx.ProjectConfig = config
+	assert.True(t, ctx.isCgoEnabled())
+
+	config, err = parseProjectConfig([]byte("build:\n  strip: tools\n"))
+	require.NoError(t, err)
+	ctx.ProjectConfig = config
+	assert.False(t, ctx.isCgoEnabled())
+	cgoEnable = true
+	assert.True(t, ctx.isCgoEnabled())
+}
+
+func TestParseCgoOnlyInCommonDocument(t *testing.T) {
+	_, err := parseProjectConfig([]byte("---\nfatima:\n  profile: local\nbuild:\n  cgo: true\n"))
+	assert.ErrorContains(t, err, "build is not allowed in profile(local) document")
+}
+
+func TestCgoCrossCompileWarnings(t *testing.T) {
+	platforms := []PlatformItem{
+		{Os: "linux", Arch: "amd64", CC: "x86_64-pc-linux-gcc"},
+		{Os: "linux", Arch: "arm64"},
+	}
+
+	config, err := parseProjectConfig([]byte("build:\n  cgo: true\n"))
+	require.NoError(t, err)
+	ctx := BuildContext{ProjectConfig: config}
+	warnings := ctx.cgoCrossCompileWarnings(platforms)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "linux_arm64 has no cc")
+
+	// cgo 를 쓰지 않으면 경고하지 않는다
+	assert.Empty(t, BuildContext{}.cgoCrossCompileWarnings(platforms))
 }

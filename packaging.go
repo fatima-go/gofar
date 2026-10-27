@@ -35,8 +35,8 @@ positional arguments:
   process_name          process(program) name
 
 optional arguments:
-  -c    CGO Enable
-  -s    Strip library while compiling
+  -c    CGO Enable (or build.cgo in project config)
+  -s    Strip library while compiling (or build.strip in project config)
 
 project config:
   .gofar/<process_name>.yaml, or common .gofar/gofar.yaml in project base dir (optional). see README
@@ -44,7 +44,7 @@ project config:
 
 var cgoEnable = false
 var stripEnable = false
-var version = "2.7.0"
+var version = "2.8.0"
 
 func Gofar() {
 	if len(os.Args) > 1 {
@@ -59,7 +59,7 @@ func Gofar() {
 	}
 
 	flag.BoolVar(&cgoEnable, "c", false, "CGO enable")
-	flag.BoolVar(&stripEnable, "s", false, "CGO enable")
+	flag.BoolVar(&stripEnable, "s", false, "strip binary")
 
 	flag.Parse()
 	if len(flag.Args()) < 1 {

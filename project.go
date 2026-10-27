@@ -26,6 +26,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -51,6 +52,7 @@ const (
 //	build:
 //	  exclude: [knowcli]            # 빌드도, far 포함도 하지 않는다
 //	  strip: tools                  # none(기본) | tools(process 외 바이너리) | all
+//	  cgo: true                     # -c 옵션 없이도 CGO 를 활성화한다
 //	install:
 //	  exclude: [knowledge-backfill] # far 에는 포함하지만 기본적으로 설치하지 않는다
 //	---
@@ -71,6 +73,7 @@ type projectFatima struct {
 type projectBuild struct {
 	Exclude []string `yaml:"exclude"`
 	Strip   string   `yaml:"strip"`
+	Cgo     bool     `yaml:"cgo"`
 }
 
 type projectInstall struct {
@@ -84,6 +87,7 @@ type ProjectConfig struct {
 	Build    projectBuild
 	Install  projectInstall
 	Profiles map[string]projectInstall
+	Warnings []string
 }
 
 // BinarySpec deployment.json 의 binaries 항목. 배포 클라이언트는 install 이 없으면 항상 설치하고,
@@ -134,6 +138,9 @@ func loadProjectConfig(projectBaseDir, processName string) (*ProjectConfig, []st
 			return nil, warnings, fmt.Errorf("invalid %s : %s", path, err.Error())
 		}
 		config.Path = path
+		for _, warning := range config.Warnings {
+			warnings = append(warnings, fmt.Sprintf("%s : %s", path, warning))
+		}
 
 		isCommon := i == len(candidates)-1
 		if isCommon && len(others) > 0 {
@@ -173,19 +180,30 @@ func isSafeProcessFileName(processName string) bool {
 	return processName != "" && !strings.HasPrefix(processName, ".") && filepath.Base(processName) == processName
 }
 
+// parseProjectConfig 프로젝트 설정을 파싱한다. 알 수 없는 키는 상위 버전 gofar 의 설정일 수 있으므로
+// 에러로 처리하지 않고 무시하며 Warnings 로 알린다
 func parseProjectConfig(data []byte) (*ProjectConfig, error) {
-	config := &ProjectConfig{Profiles: make(map[string]projectInstall)}
+	config := &ProjectConfig{Profiles: make(map[string]projectInstall), Warnings: make([]string, 0)}
 	baseFound := false
 
 	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
-	decoder.KnownFields(true)
 	for index := 1; ; index++ {
-		var doc projectDocument
-		err := decoder.Decode(&doc)
+		var node yaml.Node
+		err := decoder.Decode(&node)
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
+			return nil, fmt.Errorf("document %d : %s", index, err.Error())
+		}
+
+		for _, unknown := range findUnknownFields(&node, reflect.TypeOf(projectDocument{}), "") {
+			config.Warnings = append(config.Warnings, fmt.Sprintf("document %d line %d : unknown field %s is ignored (typo, or a field of a newer gofar?)",
+				index, unknown.line, unknown.path))
+		}
+
+		var doc projectDocument
+		if err = node.Decode(&doc); err != nil {
 			return nil, fmt.Errorf("document %d : %s", index, err.Error())
 		}
 
@@ -242,6 +260,51 @@ func parseProjectConfig(data []byte) (*ProjectConfig, error) {
 	}
 
 	return config, nil
+}
+
+type unknownField struct {
+	path string
+	line int
+}
+
+// findUnknownFields struct 의 yaml 태그에 정의되지 않은 키를 찾는다
+func findUnknownFields(node *yaml.Node, t reflect.Type, prefix string) []unknownField {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			return nil
+		}
+		return findUnknownFields(node.Content[0], t, prefix)
+	}
+	if node.Kind != yaml.MappingNode || t.Kind() != reflect.Struct {
+		return nil
+	}
+
+	fields := make(map[string]reflect.Type)
+	for i := 0; i < t.NumField(); i++ {
+		tag := strings.Split(t.Field(i).Tag.Get("yaml"), ",")[0]
+		if len(tag) > 0 && tag != "-" {
+			fields[tag] = t.Field(i).Type
+		}
+	}
+
+	unknowns := make([]unknownField, 0)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := node.Content[i]
+		path := key.Value
+		if len(prefix) > 0 {
+			path = prefix + "." + key.Value
+		}
+		fieldType, ok := fields[key.Value]
+		if !ok {
+			unknowns = append(unknowns, unknownField{path: path, line: key.Line})
+			continue
+		}
+		unknowns = append(unknowns, findUnknownFields(node.Content[i+1], fieldType, path)...)
+	}
+	return unknowns
 }
 
 // Resolve 프로젝트 설정을 바이너리 목록에 적용한다. forceStrip 은 -s 옵션으로 모든 바이너리를 strip 한다

@@ -75,6 +75,26 @@ func (b BuildContext) isStripBinary(binName string) bool {
 	return b.binarySpecs[binName].Strip
 }
 
+// isCgoEnabled CGO 활성화 여부를 구한다. -c 옵션 또는 프로젝트 설정의 build.cgo 를 따른다
+func (b BuildContext) isCgoEnabled() bool {
+	return cgoEnable || (b.ProjectConfig != nil && b.ProjectConfig.Build.Cgo)
+}
+
+// cgoCrossCompileWarnings CGO 활성화시 CC 가 지정되지 않은 추가 플랫폼을 경고한다
+func (b BuildContext) cgoCrossCompileWarnings(platforms []PlatformItem) []string {
+	warnings := make([]string, 0)
+	if !b.isCgoEnabled() {
+		return warnings
+	}
+	for _, platform := range platforms {
+		if len(platform.CC) == 0 {
+			warnings = append(warnings, fmt.Sprintf("cgo is enabled but %s has no cc in $HOME/%s/%s. cross compile may fail",
+				platform.getPlatformDirectory(), ConfigDir, ConfigPlatformFile))
+		}
+	}
+	return warnings
+}
+
 func (b BuildContext) Print() {
 	fmt.Printf("--------------------------------------------------\n")
 	defer func() {
@@ -111,6 +131,17 @@ func (b BuildContext) Print() {
 		}
 		if len(stripList) > 0 {
 			fmt.Printf("strip : %s\n", strings.Join(stripList, ","))
+		}
+	}
+
+	if b.isCgoEnabled() {
+		if cgoEnable {
+			fmt.Printf("cgo : enabled (-c)\n")
+		} else {
+			fmt.Printf("cgo : enabled (by %s)\n", b.ProjectConfig.Path)
+		}
+		for _, warning := range b.cgoCrossCompileWarnings(buildPlatformList.GetAdditionalPlatforms()) {
+			fmt.Printf("warning : %s\n", warning)
 		}
 	}
 }
@@ -343,7 +374,8 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 
 		CgoCCLink := ""
 		strip := b.isStripBinary(cmdBinName)
-		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, CgoCCLink, strip)
+		cgo := b.isCgoEnabled()
+		compileRequest := createCompileRequest(buildPlatformList.GetLocalPlatform(), cmdRecord, b.workingDir, CgoCCLink, strip, cgo)
 		compileBinary(&compileError, compileRequest)
 		if compileError > 0 {
 			return fmt.Errorf("fail to prepare binary %s\n", cmdBinName)
@@ -354,7 +386,7 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 		additionalPlatforms := buildPlatformList.GetAdditionalPlatforms()
 		wg.Add(len(additionalPlatforms))
 		for _, platform := range additionalPlatforms {
-			nextCompileRequest := createCompileRequest(platform, cmdRecord, b.workingDir, platform.CC, strip)
+			nextCompileRequest := createCompileRequest(platform, cmdRecord, b.workingDir, platform.CC, strip, cgo)
 			go func() {
 				defer wg.Done()
 				compileBinary(&compileError, nextCompileRequest)
@@ -370,9 +402,10 @@ func (b *BuildContext) prepareCmdRecordBinary() error {
 	return nil
 }
 
-func createCompileRequest(platform PlatformItem, cmdRecord CmdRecord, workingDir, cgoLink string, strip bool) BinCompileRequest {
+func createCompileRequest(platform PlatformItem, cmdRecord CmdRecord, workingDir, cgoLink string, strip, cgo bool) BinCompileRequest {
 	request := BinCompileRequest{}
 	request.Strip = strip
+	request.Cgo = cgo
 	request.TargetDir = filepath.Join(workingDir, PlatformDirName, platform.getPlatformDirectory())
 	request.BinName = cmdRecord.GetBinaryname()
 	request.BinSourcePath = cmdRecord.Path
@@ -394,6 +427,7 @@ type BinCompileRequest struct {
 	Arch          string
 	BuildCGOLink  string
 	Strip         bool
+	Cgo           bool
 }
 
 // compileBinary 바이너리를 컴파일한다
@@ -411,7 +445,7 @@ func compileBinary(compileError *uint32, request BinCompileRequest) {
 	command := fmt.Sprintf("go build -o %s", targetBin)
 
 	command = fmt.Sprintf("GOOS=%s GOARCH=%s go build -o %s", request.Os, request.Arch, targetBin)
-	if cgoEnable {
+	if request.Cgo {
 		if len(request.BuildCGOLink) > 0 {
 			command = fmt.Sprintf("CC=%s %s", request.BuildCGOLink, command)
 		}
@@ -507,7 +541,7 @@ func determineResourceDir(ctx *BuildContext) {
 
 	err := CheckDirExist(resourceDir)
 	if err != nil {
-		fmt.Errorf("ensure resource dir : %s", err.Error())
+		// resource dir 이 없으면 프로젝트 전체에서 resource 를 찾는다 (loadResourceFiles)
 		return
 	}
 
