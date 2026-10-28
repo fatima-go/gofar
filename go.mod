@@ -1,4 +1,4 @@
-module github.com/fatima-go/gofar
+module github.com/fatima-go/gofar/v2
 
 go 1.23.0
 
