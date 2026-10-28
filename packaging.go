@@ -44,7 +44,7 @@ project config:
 
 var cgoEnable = false
 var stripEnable = false
-var version = "2.8.0"
+var version = "2.8.1"
 
 func Gofar() {
 	if len(os.Args) > 1 {

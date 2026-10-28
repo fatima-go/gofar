@@ -2,8 +2,23 @@
 
 gofar 는 golang 프로그램을 fatima 환경에 배포하기 위해 빌드를 도와주는 툴이다.
 
+# Install
+
+```shell
+# 최신 버전
+$ go install github.com/fatima-go/gofar/v2@latest
+
+# 특정 버전
+$ go install github.com/fatima-go/gofar/v2@v2.8.1
+
+$ gofar version
+```
+
+v2.8.1 부터 모듈 경로가 `github.com/fatima-go/gofar/v2` 로 변경되었다. 기존 경로(`github.com/fatima-go/gofar`)로는 버전을 지정해 설치할 수 없다.
+
 # Release
 
+- v2.8.1 : 모듈 경로를 github.com/fatima-go/gofar/v2 로 변경 - go install 시 버전(태그) 지정 지원
 - v2.8.0 : 프로젝트 설정에 CGO 활성화(build.cgo) 지원 - -c 옵션 없이도 CGO 빌드, 프로젝트 설정의 알 수 없는 키는 에러 대신 경고 후 무시
 - v2.7.0 : process 별 프로젝트 설정(.gofar/<process_name>.yaml) 지원 - 한 프로젝트의 여러 process 를 각자의 설정으로 빌드
 - v2.6.0 : 프로젝트별 설정(.gofar/gofar.yaml) 지원 - 바이너리별 빌드 제외, strip, profile 별 설치 정책
