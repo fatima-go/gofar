@@ -16,8 +16,18 @@ $ gofar version
 
 v2.8.1 부터 모듈 경로가 `github.com/fatima-go/gofar/v2` 로 변경되었다. 기존 경로(`github.com/fatima-go/gofar`)로는 버전을 지정해 설치할 수 없다.
 
+## 신규 버전 안내
+
+v2.9.0 부터 빌드시 백그라운드로 최신 버전을 확인하여, 빌드가 성공하면 마지막에 업그레이드 방법을 안내한다.
+
+- 실제 빌드를 진행할 때만, 하루에 1번 확인한다 (`proxy.golang.org` 조회, 최대 3초)
+- 확인 결과는 `/tmp/fatima-<uid>/gofar-update.yml` 에 기록한다
+- 빌드가 먼저 끝나면 기다리지 않고 안내를 생략한다. 확인에 실패해도 빌드에는 영향이 없다
+- `GOFAR_NO_UPDATE_CHECK` 또는 `CI` 환경변수가 설정되어 있으면 확인하지 않는다
+
 # Release
 
+- v2.9.0 : 신규 버전 안내 - 빌드시 하루 1번 최신 버전을 확인하여 빌드 성공 후 업그레이드 방법 안내, gofar version 은 설치된 모듈 버전 표시
 - v2.8.1 : 모듈 경로를 github.com/fatima-go/gofar/v2 로 변경 - go install 시 버전(태그) 지정 지원
 - v2.8.0 : 프로젝트 설정에 CGO 활성화(build.cgo) 지원 - -c 옵션 없이도 CGO 빌드, 프로젝트 설정의 알 수 없는 키는 에러 대신 경고 후 무시
 - v2.7.0 : process 별 프로젝트 설정(.gofar/<process_name>.yaml) 지원 - 한 프로젝트의 여러 process 를 각자의 설정으로 빌드

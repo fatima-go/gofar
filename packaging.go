@@ -44,12 +44,12 @@ project config:
 
 var cgoEnable = false
 var stripEnable = false
-var version = "2.8.1"
+var version = "2.9.0"
 
 func Gofar() {
 	if len(os.Args) > 1 {
 		if os.Args[1] == "version" {
-			fmt.Printf("gofar version %s\n", version)
+			fmt.Printf("gofar version %s\n", GetVersion())
 			return
 		}
 	}
@@ -75,10 +75,16 @@ func Gofar() {
 		return
 	}
 
+	// 실제 빌드를 진행할 때만 백그라운드로 신규 버전을 확인한다
+	updateChecker := StartUpdateCheck()
+
 	ctx.Print()
 
 	err = ctx.Packaging()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gofar packaging fail : %s", err.Error())
+		return
 	}
+
+	updateChecker.Notify(os.Stderr)
 }
